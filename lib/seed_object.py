@@ -187,9 +187,9 @@ class Obj_Reader(object):
 				glColor3fv(mtl.kd)
 				glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, mtl.ka)
 				glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, mtl.kd)
-				glMaterialfv(GL_FRONT, GL_SPECULAR, mtl.ks)
+				#glMaterialfv(GL_FRONT, GL_SPECULAR, mtl.ks)  #Looks bad
 				glMaterialfv(GL_FRONT, GL_EMISSION, mtl.ke)
-				#glMaterialf(GL_FRONT, GL_SHININESS, mtl.ns)
+				#glMaterialf(GL_FRONT, GL_SHININESS, mtl.ns)  #Looks bad
 				if texture_id != None:
 					glBindTexture(GL_TEXTURE_2D, texture_id)
 				glBegin(GL_LINES)
