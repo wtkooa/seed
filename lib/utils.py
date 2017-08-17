@@ -1,6 +1,11 @@
 #!/usr/bin/python3
 
 from math import sin, cos, sqrt
+import os
+
+from OpenGL.GL import *
+import pygame
+from pygame.locals import *
 
 class Vector2(object):
 	
@@ -621,7 +626,476 @@ def matrix44_test():
 	
 	print(mat4.multiply(mat3))
 
-if __name__ == "__main__":
-	vector2_test()
-	vector3_test()
-	matrix44_test()
+class Material(object):
+
+	def __init__(self, name):
+		self.name = name
+		self.map_kd = None
+		self.texture_id = None
+		self.map_bump = ''
+		self.ns = 0
+		self.ka = []
+		self.kd = []
+		self.ks = []
+		self.ke = []
+		self.ni = 0
+		self.d = 0
+		illum = 0
+
+
+class Face_Group(object):
+
+	def __init__(self, usemtl):
+		self.usemtl = usemtl
+		self.smooth = None
+		self.lines = []
+		self.tri_faces = []
+		self.quad_faces = []
+
+
+class Obj_Object(object):
+
+	def __init__(self, name):
+		self.name = name
+		self.face_groups = []
+
+
+class Obj_Reader(object):
+
+	def __init__(self):
+		self.obj_filename = None
+		self.obj_filepath = None
+		self.tex_filepath = None
+		self.mtllib = None
+		self.obj_list = []
+		self.vertices = []
+		self.normals = []
+		self.texuals = []
+		self.materials = {}
+
+	def read(self):
+		obj_file = open(self.obj_filepath + self.obj_filename, 'r')
+		for line in obj_file:
+			line = line.rstrip()
+			if line == '': continue  #Empty Line
+			line_elements = line.split()
+			command, data = line_elements[0], line_elements[1:]
+			if command == '#':
+				continue  #Comment
+			elif command == 'mtllib':
+				self.mtllib = data[0]
+			elif command == 'usemtl':
+				face_group = Face_Group(usemtl=data[0])
+				self.obj_list[-1].face_groups.append(face_group)
+			elif command == 'o':
+				self.obj_list.append(Obj_Object(name=data[0]))
+			elif command == 'v':
+				vertex = (float(data[0]), float(data[1]), float(data[2]))
+				self.vertices.append(vertex)
+			elif command == 'vn':
+				normal = (float(data[0]), float(data[1]), float(data[2]))
+				self.normals.append(normal)
+			elif command == 'f':
+				if len(data) == 2:
+					line = []
+					for element in data:
+						indexes = element.split('/')
+						line.append(self.proc_indexes(indexes))
+					self.obj_list[-1].face_groups[-1].lines.append(line)
+				elif len(data) == 3:
+					tri_face = []
+					for element in data:
+						indexes = element.split('/')
+						tri_face.append(self.proc_indexes(indexes))
+					self.obj_list[-1].face_groups[-1].tri_faces.append(tri_face)
+				elif len(data) == 4:
+					quad_face = []
+					for element in data:
+						indexes = element.split('/')
+						quad_face.append(self.proc_indexes(indexes))
+					self.obj_list[-1].face_groups[-1].quad_faces.append(quad_face)
+			elif command == 's':
+				self.obj_list[-1].face_groups[-1].smooth = data[0]		
+			elif command == 'vt':
+				texual = (float(data[0]), float(data[1]))
+				self.texuals.append(texual)
+			else:
+				raise RuntimeError('OBJ file line not recognized: ',
+								   line_elements)
+		obj_file.close()
+		for obj in self.obj_list:
+			mtl_file = open(self.obj_filepath + self.mtllib, 'r')
+			for line in mtl_file:
+				line = line.rstrip()
+				if line == '': continue  #Empty line
+				line_elements = line.split()
+				command, data = line_elements[0], line_elements[1:]
+				if command == '#':
+					continue  #Comment
+				elif command == 'newmtl':
+					mtl = Material(name=data[0])
+					self.materials[mtl.name] = mtl
+				elif command == 'map_Kd':
+					tex_filename = data[0]
+					mtl.map_kd = tex_filename
+					tex_surface = pygame.image.load(self.tex_filepath
+													+ tex_filename)
+					tex_data = pygame.image.tostring(tex_surface,
+													 'RGB',
+													 True)
+					texture_id = glGenTextures(1)
+					glBindTexture(GL_TEXTURE_2D, texture_id)
+					mtl.texture_id = texture_id
+					self.materials[mtl.name] = mtl
+					glTexParameteri(GL_TEXTURE_2D,
+									GL_TEXTURE_MAG_FILTER,
+									GL_LINEAR)
+					glTexParameteri(GL_TEXTURE_2D,
+									GL_TEXTURE_MIN_FILTER,
+									GL_LINEAR)
+					glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+					tex_width, tex_height = tex_surface.get_rect().size
+					glTexImage2D(GL_TEXTURE_2D,
+								 0,
+								 3,
+								 tex_width,
+								 tex_height,
+								 0,
+								 GL_RGB, GL_UNSIGNED_BYTE,
+								 tex_data)
+					glBindTexture(GL_TEXTURE_2D, 0)
+				elif command == 'map_Bump':
+					mtl.map_bump = data[0]
+					self.materials[mtl.name] = mtl
+				elif command == 'Ns':
+					mtl.ns = float(data[0])
+					self.materials[mtl.name] = mtl
+				elif command == 'Ka':
+					mtl.ka = [float(data[0]), float(data[1]), float(data[2])]
+					self.materials[mtl.name] = mtl							
+				elif command == 'Kd':
+					mtl.kd = [float(data[0]), float(data[1]), float(data[2])]		
+					self.materials[mtl.name] = mtl
+				elif command == 'Ks':
+					mtl.ks = [float(data[0]), float(data[1]), float(data[2])]
+					self.materials[mtl.name] = mtl
+				elif command == 'Ke':
+					mtl.ke = [float(data[0]), float(data[1]), float(data[2])]
+					self.materials[mtl.name] = mtl
+				elif command == 'Ni':
+					mtl.ni = float(data[0])
+					self.materials[mtl.name] = mtl
+				elif command == 'd':
+					mtl.d = float(data[0])
+					self.materials[mtl.name] = mtl
+				elif command == 'illum':
+					mtl.illum = float(data[0])
+					self.materials[mtl.name] = mtl
+				else:
+					raise RuntimeError('MTL file line not recognized: ',
+									   line_elements)
+			mtl_file.close()
+
+	def load(self):
+		self.display_list = glGenLists(1)
+		glNewList(self.display_list, GL_COMPILE)
+		for obj in self.obj_list:
+			for group in obj.face_groups: 
+				usemtl = group.usemtl
+				mtl = self.materials[usemtl]
+				texture_id = mtl.texture_id
+				glColor3fv(mtl.kd)
+				glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, mtl.ka)
+				glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, mtl.kd)
+				#glMaterialfv(GL_FRONT, GL_SPECULAR, mtl.ks)  #Looks bad
+				glMaterialfv(GL_FRONT, GL_EMISSION, mtl.ke)
+				#glMaterialf(GL_FRONT, GL_SHININESS, mtl.ns)  #Looks bad
+				#if texture_id != None:
+					#glBindTexture(GL_TEXTURE_2D, texture_id) ########3
+				glBegin(GL_LINES)
+				for line in group.lines:
+					for element in line:
+						if element[2] != 0:
+							glNormal3fv(self.normals[element[2]-1])
+						if element[1] != 0:
+							glTexCoord2fv(self.texuals[element[1]-1])
+						glVertex3fv(self.vertices[element[0]-1])
+				glEnd()
+				glBegin(GL_TRIANGLES)
+				for face in group.tri_faces:
+					for element in face:
+						if element[2] != 0:
+							glNormal3fv(self.normals[element[2]-1])
+						if element[1] != 0:
+							glTexCoord2fv(self.texuals[element[1]-1])
+						glVertex3fv(self.vertices[element[0]-1])
+				glEnd()
+				glBegin(GL_QUADS)
+				for face in group.quad_faces:
+					for element in face:
+						if element[2] != 0:
+							glNormal3fv(self.normals[element[2]-1])
+						if element[1] != 0:
+							glTexCoord2fv(self.texuals[element[1]-1])
+						glVertex3fv(self.vertices[element[0]-1])
+				glEnd()
+		glEndList()
+		print('Loaded...')
+		return self.display_list
+
+	def proc_indexes(self, index):
+		if index[1] == '': index[1] = 0 
+		if index[2] == '': index[2] = 0
+		return (int(index[0]), int(index[1]), int(index[2]))
+
+
+class Object_Viewer(object):
+
+	CWD = os.getcwd()
+	OBJ_FILEPATH = CWD + '/obj/'
+	WINDOW_CAPTION = 'Game Object Viewer'
+	SCREEN_WIDTH = 800
+	SCREEN_HEIGHT = 600
+	DISPLAY = (SCREEN_WIDTH, SCREEN_HEIGHT)
+	ASPECT_RATIO = SCREEN_WIDTH / SCREEN_HEIGHT
+	DEFAULT_DISTANCE = -3
+	LIGHT_POSITION = (0, 0, 2, 0)  #Update: ?
+	DEFAULT_AMBIENT = (0.1, 0.1, 0.1)  #Update: ?
+	DEFAULT_DIFFUSE = (0.5, 0.5, 0.5)  #Update: ?
+	DEFAULT_COLOR = (0.5,0.5,0.5)  #Update: ?
+	PYGAME_MODE = HWSURFACE|DOUBLEBUF|OPENGL|RESIZABLE
+	FIELD_OF_VIEW = 60
+	Z_NEAR = 0.1
+	Z_FAR = 1000.0
+	ROTATION_SPEED = 15.0 
+	ZOOM_SPEED = 0.5  #Meters per scroll 
+	TRANSLATE_SPEED = 5
+	WIREFRAME = False
+
+	def __init__(self, *args):
+		self.handle_args(args)
+		self.init()
+		self.main()
+
+	def handle_args(self, args):
+		if len(args) == 0:
+			self.obj_filename = input('OBJ Filename: ')
+			if self.obj_filename == '':
+				self.obj_filename = 'cube.obj'
+		elif len(args) == 1:
+			self.obj_filename = args[0]
+		else:
+			raise ValueError('Object_Viewer(none or filename): ' + str(args))
+
+	def init(self):
+		pygame.init()
+		self.screen = pygame.display.set_mode(DISPLAY, PYGAME_MODE)
+		pygame.display.set_caption(WINDOW_CAPTION)
+		glEnable(GL_DEPTH_TEST)
+		glEnable(GL_TEXTURE_2D)
+		glEnable(GL_COLOR_MATERIAL)
+		glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE)
+		glColor(DEFAULT_COLOR)
+		glClearColor(0, 0, 0.5, 1)  #Update: unhardcode
+		glEnable(GL_LIGHTING)
+		glEnable(GL_LIGHT0)
+		glLightfv(GL_LIGHT0, GL_POSITION, LIGHT_POSITION)
+		glLightfv(GL_LIGHT0, GL_AMBIENT, DEFAULT_AMBIENT)
+		glLightfv(GL_LIGHT0, GL_DIFFUSE, DEFAULT_DIFFUSE)
+		glShadeModel(GL_SMOOTH)
+		if WIREFRAME: glPolygonMode(GL_FRONT_AND_BACK, GL_LINE) 
+		self.reader = Obj_Reader(filepath=OBJ_FILEPATH,
+								 filename=self.obj_filename)
+		self.reader.read()
+		self.reader.load()
+		glMatrixMode(GL_PROJECTION)
+		glLoadIdentity()
+		gluPerspective(FIELD_OF_VIEW, ASPECT_RATIO, Z_NEAR, Z_FAR)
+		glMatrixMode(GL_MODELVIEW)
+		glLoadIdentity()
+		self.mouse_event_v3 = Vector3()
+		self.rot_matrix = glGetFloatv(GL_MODELVIEW_MATRIX)
+		self.tran_pos_v3 = Vector3(0, 0, DEFAULT_DISTANCE)
+		self.clock = pygame.time.Clock()
+
+	def resize_window(self, display):
+		self.display = display
+		aspect_ratio = display[0] / display[1]
+		self.screen = pygame.display.set_mode(display, PYGAME_MODE)
+		glViewport(0, 0, display[0], display[1])
+		glMatrixMode(GL_PROJECTION)
+		glLoadIdentity()
+		gluPerspective(FIELD_OF_VIEW, aspect_ratio, Z_NEAR, Z_FAR)
+		glMatrixMode(GL_MODELVIEW)
+		glLoadIdentity()
+
+	def reset_orientation(self):
+		self.tran_pos_v3 = Vector3(0, 0, DEFAULT_DISTANCE)
+		glPushMatrix()
+		glLoadIdentity()
+		self.rot_matrix = glGetFloatv(GL_MODELVIEW_MATRIX)
+		glPopMatrix()
+
+	def rotate_object(self):
+		if self.mouse_event_v3.y == 1.0:
+			glPushMatrix()
+			glLoadIdentity()
+			delta_y, delta_x = pygame.mouse.get_rel()
+			delta_y *= self.frame_time_seconds * ROTATION_SPEED
+			delta_x *= self.frame_time_seconds * ROTATION_SPEED
+			glRotate(delta_x, 1, 0, 0)
+			glRotate(delta_y, 0, 1, 0)
+			glMultMatrixf(self.rot_matrix)
+			self.rot_matrix = glGetFloatv(GL_MODELVIEW_MATRIX)  #Update: Too slow
+			glPopMatrix()
+
+	def transform_object(self):
+		if self.mouse_event_v3.x == 1.0:
+			delta_x, delta_y = pygame.mouse.get_rel()
+			self.tran_pos_v3.x += delta_x * self.frame_time_seconds
+			self.tran_pos_v3.y -= delta_y * self.frame_time_seconds
+		glTranslate(self.tran_pos_v3.x,
+					self.tran_pos_v3.y,
+					self.tran_pos_v3.z)
+
+	def handle_events(self):
+		events = pygame.event.get()
+		for event in events:
+			if event.type == pygame.QUIT:
+				self.engine_on = False
+			elif event.type == pygame.VIDEORESIZE:
+				self.resize_window(event.size)
+			elif event.type == pygame.KEYDOWN:
+				if event.key == pygame.K_ESCAPE:
+					self.engine_on = False
+				elif event.key == pygame.K_0:
+					self.reset_orientation()
+				elif event.key == pygame.K_KP0:
+					self.reset_orientation()
+			elif (event.type == pygame.MOUSEBUTTONDOWN and
+				  pygame.mouse.get_focused()):
+					if event.button == 1:
+						self.mouse_event_v3.x = 1.0
+						pygame.mouse.get_rel()  #Dumps init rel
+					if event.button == 2:
+						self.mouse_event_v3.y = 1.0
+						pygame.mouse.get_rel()  #Dumps init rel
+					if event.button == 3:
+						self.reset_orientation()
+					if event.button == 4:
+						self.tran_pos_v3.z += ZOOM_SPEED
+					if event.button == 5:
+						self.tran_pos_v3.z -= ZOOM_SPEED
+			elif event.type == pygame.MOUSEBUTTONUP:
+				if event.button == 1:
+					self.mouse_event_v3.x = 0
+				if event.button == 2:
+					self.mouse_event_v3.y = 0
+
+	def clear_frame_buffer(self):
+		glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
+
+	def handle_time(self):
+		self.frame_time_millisec = self.clock.tick(60)
+		self.frame_time_seconds = self.frame_time_millisec / 1000.0
+		self.fps = 1000.0 / self.frame_time_millisec
+
+	def draw_object(self):
+		glPushMatrix()
+		self.transform_object()
+		self.rotate_object()
+		glMultMatrixf(self.rot_matrix)
+		glCallList(self.reader.display_list)
+		glPopMatrix()
+
+	def main(self):
+		self.engine_on = True
+		while self.engine_on:
+			self.handle_events()
+			self.handle_time()
+			self.clear_frame_buffer()
+			self.draw_object()
+			pygame.display.flip()
+		self.cleanup()
+
+	def cleanup(self):
+		pygame.quit()
+
+
+class Game_Object(object):
+
+	def __init__(self, obj_id):
+		self.name = None
+		self.id = obj_id
+		self.model = None
+		self.display_list = None
+
+
+class Obj_Data(object):
+
+	def __init__(self, datapath, dataname, texpath):
+		self.data_filepath = datapath
+		self.data_filename = dataname
+		self.tex_filepath = texpath
+		self.game_objects = {}
+
+	def read(self):
+		data_file = open(self.data_filepath + self.data_filename, 'r')
+		for line in data_file:
+			line = line.rstrip()
+			if line == '': continue  #Empty Line
+			line_elements = line.split()
+			command, data = line_elements[0], line_elements[1:]
+			if command == '#':
+				continue
+			elif command == 'o':
+				obj = Game_Object(int(data[0]))
+				self.game_objects[int(data[0])] = obj
+			elif command == 'name':
+				obj.name = data[0]
+				self.game_objects[obj.id] = obj
+			elif command == 'model':
+				obj.model = data[0]
+				self.game_objects[obj.id] = obj
+		data_file.close()
+
+	def load(self):
+		self.reader = Obj_Reader()
+		self.reader.obj_filepath = self.data_filepath
+		self.reader.tex_filepath = self.tex_filepath
+		for obj in self.game_objects:
+			self.reader.obj_filename = self.game_objects[obj].model
+			self.reader.read()
+			self.game_objects[obj].display_list = self.reader.load()
+
+
+class World_Data(object):
+
+	def __init__(self, datapath, dataname):
+		self.data_filepath = datapath
+		self.data_filename = dataname
+		self.name = None
+		self.spawn = None
+		self.object_list = []
+
+	def read(self):
+		data_file = open(self.data_filepath + self.data_filename, 'r')
+		for line in data_file:
+			line = line.rstrip()
+			if line == '': continue  #Empty Line
+			line_elements = line.split()
+			command, data = line_elements[0], line_elements[1:]
+			if command == '#':
+				continue
+			elif command == 'name':
+				self.name = data[0]
+			elif command == 'spawn':
+				self.spawn = (int(data[0]), int(data[1]), int(data[2]))
+			elif command == 'o':
+				self.object_list.append([int(data[0]), int(data[1]), int(data[2]), int(data[3])])
+
+def test():
+	print('No detectable errors. ^_^')
+
+if __name__ == '__main__':
+	test()

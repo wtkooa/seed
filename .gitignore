@@ -1,2 +1,3 @@
-obj/
+data/obj/tex_
 tmp/
+world_gen.py
